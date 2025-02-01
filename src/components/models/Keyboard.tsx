@@ -246,11 +246,16 @@ const Key = ({
 }) => {
     const lastPressed = useRef<number | null>(null);
     const keyRef = useRef<THREE.Group>(null!);
+    const audioDuration = useRef<number>(0);
 
     const audioRef = useRef(new Audio(`/assets/audio/labs/labs_${noteId}.mp3`));
     audioRef.current.volume = 0.5;
+    audioRef.current.onloadedmetadata = () => {
+        audioDuration.current = audioRef.current.duration * 450;
+    };
 
-    const PRESS_DURATION = 200;
+    const VISUAL_PRESS_DURATION = 200;
+
     const INTENSITY = -0.005;
 
     useFrame(() => {
@@ -260,13 +265,13 @@ const Key = ({
         const elapsed = Date.now() - lastPressed.current;
 
         // Progress of the press (0 - 1)
-        const progress = Math.min(elapsed / PRESS_DURATION, 1);
+        const progress = Math.min(elapsed / VISUAL_PRESS_DURATION, 1);
 
         const offset = Math.sin(progress * Math.PI) * INTENSITY;
         keyRef.current.position.y = offset;
 
         // Press is over, user is allowed to press again
-        if (Date.now() - lastPressed.current > PRESS_DURATION) {
+        if (Date.now() - lastPressed.current > audioDuration.current) {
             lastPressed.current = null;
         }
     });

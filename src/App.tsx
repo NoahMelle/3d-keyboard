@@ -35,7 +35,7 @@ function App() {
                 far={1000}
             />
             <CameraControls
-                mouseButtons={{ left: 0, middle: 1, right: 0, wheel: 0 }}
+                mouseButtons={{ left: 0, middle: 1, right: 1, wheel: 0 }}
                 ref={cameraControlsRef}
             />
             <Scene />
