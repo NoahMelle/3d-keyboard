@@ -1,5 +1,5 @@
-import { Keyboard } from "./components/models/Keyboard";
+import { Keyboard } from "./components/organisms/Keyboard";
 
 export default function Scene() {
-    return <Keyboard />;
+  return <Keyboard />;
 }
