@@ -110,7 +110,7 @@ const WhiteKey = ({
   geometry: THREE.BufferGeometry;
   material: THREE.Material;
   xPos: number;
-  noteId: string;
+  noteId: number;
 }) => {
   return (
     <Key noteId={noteId}>
@@ -135,7 +135,7 @@ const BlackKey = ({
 }: {
   geometry: THREE.BufferGeometry;
   material: THREE.Material;
-  noteId: string;
+  noteId: number;
   xPos: number;
 }) => {
   return (
@@ -157,7 +157,7 @@ const Key = ({
   noteId,
 }: {
   children: React.ReactNode;
-  noteId?: string;
+  noteId?: number;
 }) => {
   const lastPressed = useRef<number | null>(null);
   const keyRef = useRef<THREE.Group>(null!);
