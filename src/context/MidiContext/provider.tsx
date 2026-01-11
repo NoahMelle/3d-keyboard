@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { IParsedMidiMessage, parseMidiMessage } from "@/utils/parseMidiMessage";
 
@@ -22,6 +22,10 @@ export function MidiContextProvider({ children }: IMidiContextProviderProps) {
     null
   );
   const [lastKeyEvent, setLastKeyEvent] = useState<IKeyEvent | null>(null);
+  
+  // Map of note IDs to press and release handlers
+  const keyPressHandlersRef = useRef<Map<number, () => void>>(new Map());
+  const keyReleaseHandlersRef = useRef<Map<number, () => void>>(new Map());
 
   const queryPermission = async () => {
     const result = await navigator.permissions.query({
@@ -45,6 +49,26 @@ export function MidiContextProvider({ children }: IMidiContextProviderProps) {
     setLastMessage(parsedMessage);
   };
 
+  // Register/unregister key press and release handlers
+  const registerKeyPress = useCallback(
+    (
+      noteId: number,
+      pressHandler: () => void,
+      releaseHandler?: () => void
+    ) => {
+      keyPressHandlersRef.current.set(noteId, pressHandler);
+      if (releaseHandler) {
+        keyReleaseHandlersRef.current.set(noteId, releaseHandler);
+      }
+      // Return cleanup function
+      return () => {
+        keyPressHandlersRef.current.delete(noteId);
+        keyReleaseHandlersRef.current.delete(noteId);
+      };
+    },
+    []
+  );
+
   useEffect(() => {
     if (!lastMessage) {
       return;
@@ -52,24 +76,48 @@ export function MidiContextProvider({ children }: IMidiContextProviderProps) {
 
     const { command, channel, note, velocity } = lastMessage;
 
-    if ((command !== 8 && command !== 9) || channel !== 0) {
+    // Command 8 = Note Off, Command 9 = Note On
+    // Note On with velocity 0 is treated as Note Off
+    if (command !== 8 && command !== 9) {
       return;
     }
 
-    setLastKeyEvent({
-      direction: command === 8 ? "up" : "down",
+    const isNoteOff = command === 8 || (command === 9 && velocity === 0);
+
+    const keyEvent: IKeyEvent = {
+      direction: isNoteOff ? "up" : "down",
       note,
       velocity,
-    });
+    };
+
+    setLastKeyEvent(keyEvent);
+
+    // Trigger key press for Note On events (down)
+    if (!isNoteOff) {
+      const handler = keyPressHandlersRef.current.get(note);
+      if (handler) {
+        handler();
+      }
+    } else {
+      // Trigger key release for Note Off events (up)
+      const handler = keyReleaseHandlersRef.current.get(note);
+      if (handler) {
+        handler();
+      }
+    }
   }, [lastMessage]);
 
   useEffect(() => {
     const requestMIDIAccess = async () => {
-      console.log("Requesting midi access...");
+      console.log("Requesting MIDI access...");
 
-      navigator
-        .requestMIDIAccess()
-        .then((access) => setMidiAccess(access), onMIDIFailure);
+      try {
+        const access = await navigator.requestMIDIAccess();
+        setMidiAccess(access);
+        console.log("MIDI access granted");
+      } catch (error) {
+        onMIDIFailure(error instanceof Error ? error.message : String(error));
+      }
     };
 
     requestMIDIAccess();
@@ -82,16 +130,41 @@ export function MidiContextProvider({ children }: IMidiContextProviderProps) {
       return;
     }
 
-    midiAccess.inputs.forEach((input) => {
-      input.onmidimessage = onMidiMessage;
-    });
-  }, [midiAccess]);
+    // Set up handlers for existing inputs
+    const setupInputHandlers = () => {
+      midiAccess.inputs.forEach((input) => {
+        input.onmidimessage = onMidiMessage;
+      });
+    };
 
-  useEffect(() => {}, []);
+    setupInputHandlers();
+
+    // Handle new inputs being connected
+    const handleStateChange = () => {
+      console.log("MIDI device state changed");
+      setupInputHandlers();
+    };
+
+    midiAccess.addEventListener("statechange", handleStateChange);
+
+    return () => {
+      midiAccess.removeEventListener("statechange", handleStateChange);
+      // Clean up message handlers
+      midiAccess.inputs.forEach((input) => {
+        input.onmidimessage = null;
+      });
+    };
+  }, [midiAccess]);
 
   return (
     <MidiContext.Provider
-      value={{ midiAccess, permissionState, lastMessage, lastKeyEvent }}
+      value={{
+        midiAccess,
+        permissionState,
+        lastMessage,
+        lastKeyEvent,
+        registerKeyPress,
+      }}
     >
       {children}
     </MidiContext.Provider>

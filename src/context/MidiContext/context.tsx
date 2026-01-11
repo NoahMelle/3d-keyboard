@@ -8,6 +8,11 @@ export interface IMidiContext {
   permissionState: PermissionState | null;
   lastMessage: IParsedMidiMessage | null;
   lastKeyEvent: IKeyEvent | null;
+  registerKeyPress: (
+    noteId: number,
+    pressHandler: () => void,
+    releaseHandler?: () => void
+  ) => () => void;
 }
 
 export const MidiContext = createContext<IMidiContext | null>(null);
