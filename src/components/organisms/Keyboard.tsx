@@ -48,7 +48,10 @@ export function Keyboard(props: JSX.IntrinsicElements["group"]) {
 
   const { blackKeys, whiteKeys } = useKeyboardLayout(
     whiteKeyWidth,
-    allWhiteKeysLength
+    allWhiteKeysLength,
+    {
+      startingNote: 60,
+    }
   );
 
   return (

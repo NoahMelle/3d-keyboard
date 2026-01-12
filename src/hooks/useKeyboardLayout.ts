@@ -15,10 +15,13 @@ interface BlackKeyLayout {
 
 interface KeyboardLayoutConfig {
   whiteKeyCount?: number;
-  blackKeyCount?: number;
-  startingOctave?: number;
-  startingKey?: number;
+  startingNote?: number; // corresponds to MIDI note number
 }
+
+// White key semitones: C=0, D=2, E=4, F=5, G=7, A=9, B=11
+const WHITE_KEY_SEMITONES = [0, 2, 4, 5, 7, 9, 11];
+// Keys that have black keys after them: C, D, F, G, A (indices 0, 1, 3, 4, 5)
+const WHITE_KEYS_WITH_BLACK_AFTER = [0, 1, 3, 4, 5];
 
 export const useKeyboardLayout = (
   whiteKeyWidth: number,
@@ -27,87 +30,112 @@ export const useKeyboardLayout = (
 ) => {
   const {
     whiteKeyCount = 19,
-    blackKeyCount = 17,
-    startingOctave = 4,
-    startingKey = 3, // Starting at F (semitone 5 in an octave)
+    startingNote = 60, // default is C4, you can find a conversion table at https://inspiredacoustics.com/en/MIDI_note_numbers_and_center_frequencies
   } = config;
 
   const whiteKeys = useMemo(() => {
     const keys: KeyLayout[] = [];
-    // White key semitones: C=0, D=2, E=4, F=5, G=7, A=9, B=11
-    const whiteKeySemitones = [0, 2, 4, 5, 7, 9, 11];
+
+    // Calculate starting position in white key pattern (MIDI note 0 would correspond to a C, so we can easily use the modulo operator for this)
+    const startingSemitone = startingNote % 12;
+
+    // Config is invalid when the startingNote is a black key
+    if (!WHITE_KEY_SEMITONES.includes(startingSemitone)) {
+      throw new Error(
+        "Error: starting note must be the MIDI number of a white key"
+      );
+    }
+
+    const startingKeyIndex = WHITE_KEY_SEMITONES.indexOf(startingSemitone);
 
     for (let i = 0; i < whiteKeyCount; i++) {
-      const geometryIndex = i % 7;
+      // Get the key index
+      const keyInOctave = (startingKeyIndex + i) % 7;
 
-      const middleKeys = [1, 2, 5];
-      const leftToBlackKeys = [0, 4];
-      const rightToBlackKeys = [3, 6];
+      // Key indices
+      const middleKeys = [1, 4, 5]; // D, G, A
+      const leftToBlackKeys = [0, 3]; // C, F
+      const rightToBlackKeys = [2, 6]; // F, B
 
       let geometryType: KeyLayout["geometryType"] = "full";
 
-      if (i === whiteKeyCount - 1) {
-        geometryType = "full";
-      } else if (middleKeys.includes(geometryIndex)) {
-        geometryType = "middle";
-      } else if (leftToBlackKeys.includes(geometryIndex)) {
-        geometryType = "leftToBlack";
-      } else if (rightToBlackKeys.includes(geometryIndex)) {
-        geometryType = "rightToBlack";
+      if (middleKeys.includes(keyInOctave)) {
+        if (i === 0) {
+          // First key of piano
+          geometryType = "leftToBlack";
+        } else if (i === whiteKeyCount - 1) {
+          // Last key of piano
+          geometryType = "rightToBlack";
+        } else {
+          geometryType = "middle";
+        }
+      } else if (leftToBlackKeys.includes(keyInOctave)) {
+        if (i === whiteKeyCount - 1) {
+          // Last key of piano
+          geometryType = "full";
+        } else {
+          geometryType = "leftToBlack";
+        }
+      } else if (rightToBlackKeys.includes(keyInOctave)) {
+        if (i === 0) {
+          // First key of piano
+          geometryType = "full";
+        } else {
+          geometryType = "rightToBlack";
+        }
       }
 
+      // The center of the screen is also the center of our model, so we have to offset everything
       const xPos =
         i * whiteKeyWidth - allWhiteKeysLength / 2 + 0.5 * whiteKeyWidth;
 
       // Calculate MIDI note
-      const keyInOctave = (startingKey + i) % 7;
-      const octavesFromStart = Math.floor((startingKey + i) / 7);
-      const octave = startingOctave + octavesFromStart;
-      const semitone = whiteKeySemitones[keyInOctave];
+      const octavesFromStart = Math.floor((startingKeyIndex + i) / 7);
+      const baseOctave = Math.floor(startingNote / 12);
+      const octave = baseOctave + octavesFromStart;
+      const semitone = WHITE_KEY_SEMITONES[keyInOctave];
       const id = octave * 12 + semitone;
 
       keys.push({ id, xPos, geometryType });
     }
 
     return keys;
-  }, [
-    whiteKeyWidth,
-    allWhiteKeysLength,
-    whiteKeyCount,
-    startingOctave,
-    startingKey,
-  ]);
+  }, [whiteKeyWidth, allWhiteKeysLength, whiteKeyCount, startingNote]);
 
   const blackKeys = useMemo(() => {
     const keys: BlackKeyLayout[] = [];
-    const blackKeyPositions = [0, 1, 2, 4, 5]; // Positions in the 7-white-key pattern
-    // Black key semitones: C#=1, D#=3, F#=6, G#=8, A#=10
 
-    for (let i = 0; i < blackKeyCount; i++) {
-      const geometryIndex = i % 7;
+    // Calculate starting position in white key pattern
+    const startingSemitone = startingNote % 12;
+    const startingKeyIndex = WHITE_KEY_SEMITONES.indexOf(startingSemitone);
 
-      if (!blackKeyPositions.includes(geometryIndex)) {
+    // Map white key index to black key semitone
+    const whiteKeyToBlackSemitone: { [key: number]: number } = {
+      0: 1, // C → C#
+      1: 3, // D → D#
+      3: 6, // F → F#
+      4: 8, // G → G#
+      5: 10, // A → A#
+    };
+
+    // Iterate over white keys and skip if white key doesn't have a black key next to it
+    for (let i = 0; i < whiteKeyCount - 1; i++) {
+      // Get the key index
+      const keyInOctave = (startingKeyIndex + i) % 7;
+
+      // Only create black key if this white key has one after it
+      if (!WHITE_KEYS_WITH_BLACK_AFTER.includes(keyInOctave)) {
         continue;
       }
 
-      const xPos =
-        i * whiteKeyWidth - (allWhiteKeysLength - whiteKeyWidth * 2) / 2;
+      // Position black key between white key i and i+1
+      // Use the same base calculation as white keys, but offset by whiteKeyWidth
+      const xPos = (i + 1) * whiteKeyWidth - allWhiteKeysLength / 2;
 
-      // Calculate which white key we're associated with
-      const keyInOctave = (startingKey + i) % 7;
-      const octavesFromStart = Math.floor((startingKey + i) / 7);
-      const octave = startingOctave + octavesFromStart;
-
-      // Map the key index (0-6) to the black key semitone
-      // C(0)→C#(1), D(1)→D#(3), E(2) -> skip, F(3)→F#(6), G(4)→G#(8), A(5)→A#(10), B(6)→skip
-      const whiteKeyToBlackSemitone: { [key: number]: number } = {
-        0: 1, // C → C#
-        1: 3, // D → D#
-        3: 6, // E → F#
-        4: 8, // G → G#
-        5: 10, // A → A#
-      };
-
+      // Calculate MIDI note
+      const octavesFromStart = Math.floor((startingKeyIndex + i) / 7);
+      const baseOctave = Math.floor(startingNote / 12);
+      const octave = baseOctave + octavesFromStart;
       const semitone = whiteKeyToBlackSemitone[keyInOctave];
       const id = octave * 12 + semitone;
 
@@ -115,13 +143,7 @@ export const useKeyboardLayout = (
     }
 
     return keys;
-  }, [
-    whiteKeyWidth,
-    allWhiteKeysLength,
-    blackKeyCount,
-    startingOctave,
-    startingKey,
-  ]);
+  }, [whiteKeyWidth, allWhiteKeysLength, whiteKeyCount, startingNote]);
 
   return { whiteKeys, blackKeys };
 };
