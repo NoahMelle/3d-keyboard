@@ -50,7 +50,7 @@ export function Keyboard(props: JSX.IntrinsicElements["group"]) {
     whiteKeyWidth,
     allWhiteKeysLength,
     {
-      startingNote: 60,
+      startingNote: 48,
     }
   );
 
@@ -174,27 +174,9 @@ const Key = ({
   const INTENSITY = -0.005;
 
   useFrame(() => {
-    if (!lastPressed.current) {
-      // Reset position when not pressed
-      if (keyRef.current.position.y !== 0) {
-        keyRef.current.position.y = 0;
-      }
-      return;
-    }
-
-    // Time since key press
-    const elapsed = Date.now() - lastPressed.current;
-
-    // Progress of the press (0 - 1)
-    const progress = Math.min(elapsed / VISUAL_PRESS_DURATION, 1);
-
-    const offset = Math.sin(progress * Math.PI) * INTENSITY;
-    keyRef.current.position.y = offset;
-
-    // Reset after visual animation
-    if (elapsed > VISUAL_PRESS_DURATION && !isPressedRef.current) {
-      lastPressed.current = null;
-    }
+    const targetY = isPressedRef.current ? INTENSITY : 0; // pressed → down, released → up
+    // smooth lerp to target position
+    keyRef.current.position.y += (targetY - keyRef.current.position.y) * 0.2;
   });
 
   const handleKeyPress = useCallback(
@@ -211,7 +193,6 @@ const Key = ({
 
   const handleKeyRelease = useCallback(() => {
     if (noteId === undefined) return;
-    if (!isPressedRef.current) return;
 
     isPressedRef.current = false;
     releaseNote(noteId);
@@ -230,9 +211,10 @@ const Key = ({
 
     const unregister = registerKeyPress(
       noteId,
-      () => handleKeyPress(0.8),
-      handleKeyRelease
+      (velocity) => handleKeyPress(velocity),
+      () => handleKeyRelease()
     );
+
     return unregister;
   }, [noteId, registerKeyPress, handleKeyPress, handleKeyRelease]);
 

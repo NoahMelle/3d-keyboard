@@ -12,7 +12,7 @@ export default function SynthesizerControls() {
   return (
     <div className="absolute top-0 right-0 w-full p-4 flex justify-end">
       <button
-        className="bg-white px-4 py-2 rounded-lg flex gap-1 items-center text-sm"
+        className="bg-white px-4 py-2 rounded-lg flex gap-1 items-center text-sm hover:bg-neutral-100 transition-colors border border-neutral-200 shadow-sm"
         onClick={() => setIsOpen((prev) => !prev)}
         aria-label="Open synthesizer controls"
       >

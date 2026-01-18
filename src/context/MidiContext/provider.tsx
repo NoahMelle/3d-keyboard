@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { IParsedMidiMessage, parseMidiMessage } from "@/utils/parseMidiMessage";
+import { parseMidiMessage } from "@/utils/parseMidiMessage";
 
 import { MidiContext } from "./context";
 
@@ -8,113 +8,94 @@ interface IMidiContextProviderProps {
   children: React.ReactNode;
 }
 
-export interface IKeyEvent {
-  note: number;
-  velocity: number;
-  direction: "up" | "down";
-}
-
 export function MidiContextProvider({ children }: IMidiContextProviderProps) {
   const [permissionState, setPermissionState] =
     useState<PermissionState | null>(null);
   const [midiAccess, setMidiAccess] = useState<MIDIAccess | null>(null);
-  const [lastMessage, setLastMessage] = useState<IParsedMidiMessage | null>(
-    null
+
+  // registered handlers
+  const keyPressHandlersRef = useRef<Map<number, (velocity: number) => void>>(
+    new Map(),
   );
-  const [lastKeyEvent, setLastKeyEvent] = useState<IKeyEvent | null>(null);
-  
-  // Map of note IDs to press and release handlers
-  const keyPressHandlersRef = useRef<Map<number, () => void>>(new Map());
   const keyReleaseHandlersRef = useRef<Map<number, () => void>>(new Map());
 
-  const queryPermission = async () => {
-    const result = await navigator.permissions.query({
-      name: "midi",
+  // track currently active notes
+  const activeNotesRef = useRef<Set<number>>(new Set());
+
+  // release all notes that are currently pressed
+  const releaseAllNotes = useCallback(() => {
+    activeNotesRef.current.forEach((note) => {
+      keyReleaseHandlersRef.current.get(note)?.();
     });
 
+    activeNotesRef.current.clear();
+  }, []);
+
+  const queryPermission = async () => {
+    const result = await navigator.permissions.query({ name: "midi" });
     setPermissionState(result.state);
   };
 
   const onMIDIFailure = (message: string) => {
-    console.log(`Failed to get MIDI access - ${message}`);
+    console.error(`Failed to get MIDI access: ${message}`);
   };
 
-  const onMidiMessage = (message: MIDIMessageEvent) => {
-    const parsedMessage = parseMidiMessage(message);
+  const onMidiMessage = (event: MIDIMessageEvent) => {
+    const parsed = parseMidiMessage(event);
+    if (!parsed) return;
 
-    if (!parsedMessage) {
-      return;
+    const { command, note, velocity } = parsed;
+
+    // only handle note on/off messages
+    if (command !== 8 && command !== 9) return;
+
+    const isNoteOff = command === 8 || (command === 9 && velocity === 0);
+    const isActive = activeNotesRef.current.has(note);
+
+    if (!isNoteOff) {
+      // suppress duplicate note ons
+      if (isActive) return;
+
+      activeNotesRef.current.add(note);
+      keyPressHandlersRef.current.get(note)?.(velocity);
+    } else {
+      // suppress stray note offs
+      if (!isActive) return;
+
+      activeNotesRef.current.delete(note);
+      keyReleaseHandlersRef.current.get(note)?.();
     }
-
-    setLastMessage(parsedMessage);
   };
 
-  // Register/unregister key press and release handlers
   const registerKeyPress = useCallback(
     (
       noteId: number,
-      pressHandler: () => void,
-      releaseHandler?: () => void
+      pressHandler: (velocity: number) => void,
+      releaseHandler?: () => void,
     ) => {
       keyPressHandlersRef.current.set(noteId, pressHandler);
       if (releaseHandler) {
         keyReleaseHandlersRef.current.set(noteId, releaseHandler);
       }
-      // Return cleanup function
+
       return () => {
+        if (activeNotesRef.current.has(noteId)) {
+          activeNotesRef.current.delete(noteId);
+          keyReleaseHandlersRef.current.get(noteId)?.();
+        }
+
         keyPressHandlersRef.current.delete(noteId);
         keyReleaseHandlersRef.current.delete(noteId);
       };
     },
-    []
+    [],
   );
 
   useEffect(() => {
-    if (!lastMessage) {
-      return;
-    }
-
-    const { command, channel, note, velocity } = lastMessage;
-
-    // Command 8 = Note Off, Command 9 = Note On
-    // Note On with velocity 0 is treated as Note Off
-    if (command !== 8 && command !== 9) {
-      return;
-    }
-
-    const isNoteOff = command === 8 || (command === 9 && velocity === 0);
-
-    const keyEvent: IKeyEvent = {
-      direction: isNoteOff ? "up" : "down",
-      note,
-      velocity,
-    };
-
-    setLastKeyEvent(keyEvent);
-
-    // Trigger key press for Note On events (down)
-    if (!isNoteOff) {
-      const handler = keyPressHandlersRef.current.get(note);
-      if (handler) {
-        handler();
-      }
-    } else {
-      // Trigger key release for Note Off events (up)
-      const handler = keyReleaseHandlersRef.current.get(note);
-      if (handler) {
-        handler();
-      }
-    }
-  }, [lastMessage]);
-
-  useEffect(() => {
     const requestMIDIAccess = async () => {
-      console.log("Requesting MIDI access...");
-
       try {
         const access = await navigator.requestMIDIAccess();
         setMidiAccess(access);
-        console.log("MIDI access granted");
       } catch (error) {
         onMIDIFailure(error instanceof Error ? error.message : String(error));
       }
@@ -125,44 +106,55 @@ export function MidiContextProvider({ children }: IMidiContextProviderProps) {
 
   useEffect(() => {
     queryPermission();
+    if (!midiAccess) return;
 
-    if (!midiAccess) {
-      return;
-    }
-
-    // Set up handlers for existing inputs
-    const setupInputHandlers = () => {
+    const setupInputs = () => {
       midiAccess.inputs.forEach((input) => {
         input.onmidimessage = onMidiMessage;
       });
     };
 
-    setupInputHandlers();
+    setupInputs();
 
-    // Handle new inputs being connected
     const handleStateChange = () => {
-      console.log("MIDI device state changed");
-      setupInputHandlers();
+      // If device is unplugged, release all notes
+      releaseAllNotes();
+      setupInputs();
     };
 
     midiAccess.addEventListener("statechange", handleStateChange);
 
     return () => {
+      releaseAllNotes();
       midiAccess.removeEventListener("statechange", handleStateChange);
-      // Clean up message handlers
       midiAccess.inputs.forEach((input) => {
         input.onmidimessage = null;
       });
     };
-  }, [midiAccess]);
+  }, [midiAccess, releaseAllNotes]);
+
+  // browser safety to release notes when tab is hidden or window loses focus
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.hidden) releaseAllNotes();
+    };
+
+    const handleBlur = () => releaseAllNotes();
+
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("blur", handleBlur);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("blur", handleBlur);
+    };
+  }, [releaseAllNotes]);
 
   return (
     <MidiContext.Provider
       value={{
         midiAccess,
         permissionState,
-        lastMessage,
-        lastKeyEvent,
         registerKeyPress,
       }}
     >

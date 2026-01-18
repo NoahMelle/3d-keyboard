@@ -6,21 +6,12 @@ import {
   PerspectiveCamera,
 } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
-import { forwardRef, useEffect, useRef } from "react";
+import { forwardRef, useRef } from "react";
 import * as THREE from "three";
-
-import useMidi from "@/hooks/useMidi";
 
 import Scene from "./Scene";
 
 function App() {
-  const { lastKeyEvent } = useMidi();
-
-  // Handle MIDI message events
-  useEffect(() => {
-    console.log(lastKeyEvent);
-  }, [lastKeyEvent]);
-
   const planeRef = useRef<THREE.Mesh | null>(null);
   const cameraControlsRef = useRef<CameraControls>(null);
 
